@@ -11,53 +11,45 @@ async def send_words(message, user_id):
     if cursor.execute('select user_id from users where user_id = ?', (user_id,)).fetchone() is None:
         cursor.execute('insert into users(user_id) values(?)', (user_id,))
 
-    word_en_id, word_en, part_of_speech, translation, keyboard = await kb.generate_words()
+    word_en_id, word_en, part_of_speech, translation, keyboard = await kb.generate_words(user_id)
 
     cursor.execute('update users set word_id = ?, word = ? where user_id = ?', (word_en_id, translation, user_id))
 
-    await message.answer(f'Выберите перевод слова <strong><i>{word_en}</i></strong>, часть речи — <strong><i>{part_of_speech}</i></strong>', reply_markup=keyboard, parse_mode='HTML')
+    await message.answer(f'🔍 Выберите перевод слова <strong><i>{word_en}</i></strong>. 📝 Часть речи — <strong><i>{part_of_speech}</i></strong>', reply_markup=keyboard, parse_mode='HTML')
 
     connect.commit()
 
 
-class GetUserMiddleware(BaseMiddleware):
-    async def __call__(
-        self,
-        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
-        event: TelegramObject,
-        data: Dict[str, Any],
-    ):
-        user = data['event_from_user']
-        data['user'] = cursor.execute('select * from users where id = ?', (user.id,)).fetchone()
-
-
 router = Router()
-# router.message.middleware(GetUserMiddleware())
 
 connect = sqlite3.connect('./english.db')
 cursor = connect.cursor()
-# cursor.row_factory = sqlite3.Row
 
 
 
-@router.message(CommandStart())
-async def start(msg: Message):
-    # num = random.randint(1, 200)
-    # bilet_id = num - 1
-    # cursor.execute('update users set bilet_id = ?, word_index = 0', (bilet_id,))
+def isdigit(text):
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
-    # await main(msg)
 
-    await send_words(msg, msg.from_user.id)
+@router.message(Command('bilet'))
+async def choice_bilet(message: Message):
+    await message.answer('🎟️ Выберите номер билета от 0 до 200.\n📩 Отправьте -1, чтобы учить все слова сразу!')
+
 
 @router.message()
 async def main(msg: Message):
-    await send_words(msg, msg.from_user.id)
-    print('sanya')
-    # это может умереть, судя по типизации
-    # bilet_id, question_index = cursor.execute('select bilet_id, question_index from users where id = ?', (msg.from_user.id)).fetchone()
+    text = isdigit(msg.text)
 
+    if (text is not None) and (-1 <= text < 200):
+        await msg.answer(f'Вы решаете {text} билет')
+        cursor.execute('update users set bilet = ? where user_id = ?', (text, msg.from_user.id))
+        connect.commit()
     
+    await send_words(msg, msg.from_user.id)
+
 
 @router.callback_query()
 async def check_response(callback: CallbackQuery):
@@ -65,25 +57,23 @@ async def check_response(callback: CallbackQuery):
 
     word_en_id = cursor.execute('select word_id from users where user_id = ?', (callback.from_user.id,)).fetchone()[0]
     word_en, part_of_sheech = cursor.execute('select word, part_of_speech from words where id = ?',(word_en_id,)).fetchone()
-    word_ru = cursor.execute('select translation from translations where word_id = ?', (word_en_id,)).fetchall()
+    words_ru = cursor.execute('select translation from translations where word_id = ?', (word_en_id,)).fetchall()
 
-    word_list = []
+    list_ru_words = ', '.join(word[0] for word in words_ru)
 
-    for word in word_ru:
-        word_list.append(word)
+ 
+    if callback.data == 'Не знаю':
+        await callback.message.answer(f'📚 Английское слово: <b>{word_en}</b>\n📝 Часть речи: <b>{part_of_sheech}</b>\n🌍 Перевод слова: <b>{list_ru_words}</b>', parse_mode='HTML')
 
-    print(word_list)
-
-    if callback.data == 'не знаю':
-        await callback.message.answer(f'{word_en}, часть речи {part_of_sheech} варианты переводов: {word_list}')
+        return await send_words(callback.message, callback.from_user.id)
 
     word = cursor.execute('select word from users where user_id = ?', (callback.from_user.id,)).fetchone()[0]
 
     if word != callback.data:
-        await callback.message.answer(f'Неверно! Правильно - {word}')
+        await callback.message.answer(f'❌ Неверно!\n📚 Английское слово: <b>{word_en}</b>\n📝 Часть речи: <b>{part_of_sheech}</b>\n🌍 Перевод слова: <b>{list_ru_words}</b>', parse_mode='HTML')
     else:
         await callback.message.answer('Верно!')
 
-    await send_words(callback.message, callback.from_user.id)
+    return await send_words(callback.message, callback.from_user.id)
 
 
