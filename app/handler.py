@@ -101,7 +101,9 @@ async def change_mode(message: Message):
     hard_mode = cursor.execute('update users set hard_mode = not hard_mode returning hard_mode').fetchone()[0]
     connect.commit()
  
-    await message.answer(f'Ваш режим был изменен на {'сложный' if hard_mode else 'простой'}!')
+    mode = 'сложный' if hard_mode else 'простой'
+
+    await message.answer(f'Ваш режим был изменен на {mode}!')
     await send_words(message, message.from_user.id)
 
 
